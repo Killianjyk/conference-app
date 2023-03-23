@@ -33,8 +33,6 @@ class Attendee(models.Model):
             Badge.objects.create(attendee=self)
 
 
-
-
 class Badge(models.Model):
     """
     The Badge model represents the badge an attendee gets to
