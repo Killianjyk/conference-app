@@ -2,8 +2,10 @@ from django.http import JsonResponse
 from common.json import ModelEncoder
 from .models import Presentation
 from events.models import Conference
+from events.api_views import ConferenceListEncoder
 from django.views.decorators.http import require_http_methods
 import json
+import pika
 
 
 class PresentationListEncoder(ModelEncoder):
@@ -51,6 +53,12 @@ class PresentationDetailEncoder(ModelEncoder):
         "synopsis",
         "created",
     ]
+    encoders = {
+        "conference": ConferenceListEncoder(),
+    }
+
+    def get_extra_data(self, o):
+        return {"status": o.status.name}
 
 
 @require_http_methods(["DELETE", "GET", "PUT"])
@@ -86,3 +94,54 @@ def api_show_presentation(request, id):
             encoder=PresentationDetailEncoder,
             safe=False,
         )
+
+
+@require_http_methods(["PUT"])
+def api_approve_presentation(request, id):
+    presentation = Presentation.objects.get(id=id)
+    presentation.approve()
+    content = json.loads(request.body)
+    parameters = pika.ConnectionParameters(host="rabbitmq")
+    connection = pika.BlockingConnection(parameters)
+    channel = connection.channel()
+    channel.queue_declare(queue="presentation_approvals")
+    channel.basic_publish(
+        exchange="",
+        routing_key="presentation_approvals",
+        body=json.dumps({
+            "presenter_name": content["presenter_name"],
+            "presenter_email": content["presenter_email"],
+            "title": content["title"]}),
+    )
+
+    connection.close()
+    return JsonResponse(
+        presentation,
+        encoder=PresentationDetailEncoder,
+        safe=False,
+    )
+
+
+@require_http_methods(["PUT"])
+def api_reject_presentation(request, id):
+    presentation = Presentation.objects.get(id=id)
+    presentation.reject()
+    content = json.loads(request.body)
+    parameters = pika.ConnectionParameters(host="rabbitmq")
+    connection = pika.BlockingConnection(parameters)
+    channel = connection.channel()
+    channel.queue_declare(queue="presentation_rejections")
+    channel.basic_publish(
+        exchange="",
+        routing_key="presentation_rejections",
+        body=json.dumps({
+            "presenter_name": content["presenter_name"],
+            "presenter_email": content["presenter_email"],
+            "title": content["title"]}),
+    )
+    connection.close()
+    return JsonResponse(
+        presentation,
+        encoder=PresentationDetailEncoder,
+        safe=False,
+    )
